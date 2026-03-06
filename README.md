@@ -23,7 +23,7 @@ A real-time, interactive Option Chain analysis web application built entirely in
 
 **1. Clone the repository**
 ```bash
-git clone [https://github.com/YOUR_GITHUB_USERNAME/fyers-option-chain.git](https://github.com/YOUR_GITHUB_USERNAME/fyers-option-chain.git)
+git clone https://github.com/chandeln16/fyers_optionchain_dashboard
 cd fyers-option-chain
 2. Install Dependencies
 
