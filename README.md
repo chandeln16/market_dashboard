@@ -45,7 +45,7 @@ Step 3: Click on Connect to Fyers.
 
 Step 4: Select your preferred Index and Expiry Date.
 
-Step 5: Turn on Auto-Refresh to get live data every 5 seconds!
+Step 5: Turn on Auto-Refresh to get live data every 5 seconds! '''
 
 ⚠️ Disclaimer
 This dashboard is built for educational and analytical purposes only. Please do not use this solely for executing real-money trades. Always verify data with your broker's official terminal.
@@ -67,4 +67,5 @@ Is Options Dashboard ko smoothly run karne aur live market metrics (Nifty 50, Se
 
 Token generation ke process ko alag aur simple rakhne ke liye ek dedicated tool banaya gaya hai. Aap apna daily access token yahan se generate kar sakte hain:
 🔗 Fyers Access Token Generator
+https://accesstokengenratorfyers-yqp7rcqjyu8phh5gaode43.streamlit.app/
 
