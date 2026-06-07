@@ -18,6 +18,8 @@ A real-time, interactive Option Chain analysis web application built entirely in
 * **Frontend/Framework:** [Streamlit](https://streamlit.io/)
 * **Data Manipulation:** Pandas
 * **Broker API:** Fyers API v3 (`fyers-apiv3`)
+* APP LINK {https://fyers-option-dboard.streamlit.app/}
+* ACCESS TOKEN GENERATOR {https://accesstokengenratorfyers-yqp7rcqjyu8phh5gaode43.streamlit.app/}
 
 ## ⚙️ How to Run Locally
 
