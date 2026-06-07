@@ -59,3 +59,12 @@ Feel free to reach out for feedback or collaborations! If you find this project 
 
 
 https://fyers-option-dboard.streamlit.app/
+
+
+## 🔑 Fyers API Authentication & Access Token
+
+Is Options Dashboard ko smoothly run karne aur live market metrics (Nifty 50, Sensex, PCR) fetch karne ke liye Fyers API access token ki zarurat hoti hai.
+
+Token generation ke process ko alag aur simple rakhne ke liye ek dedicated tool banaya gaya hai. Aap apna daily access token yahan se generate kar sakte hain:
+🔗 Fyers Access Token Generator
+
