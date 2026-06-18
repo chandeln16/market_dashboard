@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import time
 from datetime import datetime
+import sqlite3
 from fyers_apiv3 import fyersModel
 
 # ─────────────────────── PAGE CONFIG ───────────────────────
@@ -12,10 +13,33 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ─────────────────────── DATABASE CONFIG ───────────────────
+# Initialize SQLite Connection (Cached to prevent reconnecting on every rerun)
+@st.cache_resource
+def init_db():
+    conn = sqlite3.connect('pcr_data.db', check_same_thread=False)
+    c = conn.cursor()
+    # Create table if it doesn't exist
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS pcr_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_time TEXT,
+            index_name TEXT,
+            expiry_date TEXT,
+            oi_pcr REAL,
+            change_oi_pcr REAL,
+            volume_pcr REAL,
+            change_volume_pcr REAL
+        )
+    ''')
+    conn.commit()
+    return conn
+
+db_conn = init_db()
+
 # ─────────────────────── SESSION STATE ─────────────────────
+# Removed 'pcr_history' and 'last_pcr_time' as they are now handled by SQLite
 for k, v in {
-    "pcr_history":       [],
-    "last_pcr_time":     None,
     "fyers":             None,
     "auto_refresh":      False,
     "current_index":     "NIFTY 50",
@@ -60,8 +84,6 @@ if st.session_state.current_index != selected_index_name:
     st.session_state.current_expiry = None
     st.session_state.expiry_options = []
     st.session_state.expiry_timestamps = {}
-    st.session_state.pcr_history = []
-    st.session_state.last_pcr_time = None
     st.rerun()
 
 if st.session_state.fyers and not st.session_state.expiry_options:
@@ -79,8 +101,6 @@ if st.session_state.expiry_options:
     selected_timestamp = st.session_state.expiry_timestamps.get(selected_expiry, "")
     if st.session_state.current_expiry != selected_expiry:
         st.session_state.current_expiry = selected_expiry
-        st.session_state.pcr_history = []
-        st.session_state.last_pcr_time = None
         st.rerun()
 
 st.sidebar.markdown("---")
@@ -133,17 +153,42 @@ def compute_summary(df_c, df_p):
         "Volume PCR": sdiv(tp_vol, tc_vol), "Change Volume PCR": 0.0, "Call Chng Volume": 0, "Put Chng Volume": 0
     }
 
-def maybe_record_pcr(s_data):
+def maybe_record_pcr(s_data, index_name, expiry_date):
+    """Saves data to SQLite if 5 minutes have passed since the last record for the selected index & expiry."""
+    c = db_conn.cursor()
+    # Check the latest timestamp for this specific index & expiry
+    c.execute('''
+        SELECT record_time FROM pcr_history 
+        WHERE index_name = ? AND expiry_date = ? 
+        ORDER BY record_time DESC LIMIT 1
+    ''', (index_name, expiry_date))
+    
+    row = c.fetchone()
     now = datetime.now()
-    if st.session_state.last_pcr_time is None or (now - st.session_state.last_pcr_time).total_seconds() >= 300:
-        st.session_state.pcr_history.append({
-            "Time": now.strftime("%H:%M:%S"), 
-            "OI PCR": s_data["OI PCR"],
-            "Change OI PCR": s_data["Change OI PCR"],
-            "Volume PCR": s_data["Volume PCR"],
-            "Change Volume PCR": s_data["Change Volume PCR"]
-        })
-        st.session_state.last_pcr_time = now
+    should_record = False
+    
+    if row is None:
+        should_record = True
+    else:
+        last_time = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+        if (now - last_time).total_seconds() >= 300:
+            should_record = True
+
+    if should_record:
+        c.execute('''
+            INSERT INTO pcr_history 
+            (record_time, index_name, expiry_date, oi_pcr, change_oi_pcr, volume_pcr, change_volume_pcr) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            now.strftime("%Y-%m-%d %H:%M:%S"), 
+            index_name, 
+            expiry_date, 
+            s_data["OI PCR"], 
+            s_data["Change OI PCR"], 
+            s_data["Volume PCR"], 
+            s_data["Change Volume PCR"]
+        ))
+        db_conn.commit()
 
 def sentiment(v):
     if v > 1.2: return "🟢 Bullish"
@@ -165,7 +210,7 @@ try:
     strikes_list = sorted(df_c['Strike'].unique().tolist())
     
     if strikes_list:
-        # SMART ATM LOGIC: Agar Fyers ka ATM galat hai, toh Call/Put Premium ke aadhar par ATM dhundho
+        # SMART ATM LOGIC
         if api_atm <= 0:
             try:
                 merged = pd.merge(df_c[['Strike', 'LTP']], df_p[['Strike', 'LTP']], on='Strike', suffixes=('_C', '_P'))
@@ -178,10 +223,10 @@ try:
             
         atm_index = strikes_list.index(atm_closest)
         
-        # 1. Lower Strikes Generator (-12 se ATM tak)
+        # 1. Lower Strikes Generator
         lower_options = []
         lower_map = {}
-        for i in range(-12, 1): # -12 se 0 tak loop chalega
+        for i in range(-12, 1):
             idx = atm_index + i
             if 0 <= idx < len(strikes_list):
                 s = strikes_list[idx]
@@ -189,10 +234,10 @@ try:
                 lower_options.append(label)
                 lower_map[label] = s
                 
-        # 2. Upper Strikes Generator (ATM se +12 tak)
+        # 2. Upper Strikes Generator
         upper_options = []
         upper_map = {}
-        for i in range(0, 13): # 0 se +12 tak loop chalega
+        for i in range(0, 13):
             idx = atm_index + i
             if 0 <= idx < len(strikes_list):
                 s = strikes_list[idx]
@@ -204,20 +249,14 @@ try:
         st.sidebar.markdown("---")
         st.sidebar.subheader("🎯 Strike Range Menu")
         
-        # Box 1: Lower Strike (Default sabse pehla yaani -12 select hoga)
         selected_lower_label = st.sidebar.selectbox("📉 Select Lower Strike (-12 to ATM)", options=lower_options, index=0)
-        
-        # Box 2: Locked ATM Price (Disabled Box)
         st.sidebar.selectbox("📍 Current ATM (Fixed)", options=[f"{atm_closest:,.0f} (ATM)"], disabled=True)
-        
-        # Box 3: Upper Strike (Default sabse aakhiri yaani +12 select hoga)
         selected_upper_label = st.sidebar.selectbox("📈 Select Upper Strike (ATM to +12)", options=upper_options, index=len(upper_options)-1)
         
-        # Dictionary Mapping se 100% exact strike value nikalna (No string replace errors)
         start_strike = lower_map[selected_lower_label]
         end_strike = upper_map[selected_upper_label]
         
-        # Data Filter Karna
+        # Filter Data
         df_c = df_c[(df_c['Strike'] >= start_strike) & (df_c['Strike'] <= end_strike)]
         df_p = df_p[(df_p['Strike'] >= start_strike) & (df_p['Strike'] <= end_strike)]
         
@@ -225,7 +264,8 @@ try:
 
     # Metrics calculation 
     s = compute_summary(df_c, df_p)
-    maybe_record_pcr(s)
+    # Record to DB logic
+    maybe_record_pcr(s, selected_index_name, st.session_state.current_expiry)
 
     # UI Row 1 - Metrics
     a1, a2, a3, a4 = st.columns(4)
@@ -241,12 +281,26 @@ try:
     b3.metric("📊 Volume PCR", s["Volume PCR"], delta=sentiment(s["Volume PCR"]), delta_color="off")
     b4.metric("📊 Chng Vol PCR", s["Change Volume PCR"], delta=sentiment(s["Change Volume PCR"]), delta_color="off")
 
-    # SECTION 2 — Separate Tables & Chart
-    if st.session_state.pcr_history:
+    # SECTION 2 — Separate Tables & Chart Fetching from Database
+    query = '''
+        SELECT 
+            record_time, 
+            oi_pcr as "OI PCR", 
+            change_oi_pcr as "Change OI PCR", 
+            volume_pcr as "Volume PCR", 
+            change_volume_pcr as "Change Volume PCR" 
+        FROM pcr_history 
+        WHERE index_name = ? AND expiry_date = ?
+        ORDER BY record_time ASC
+    '''
+    df_h = pd.read_sql_query(query, db_conn, params=(selected_index_name, st.session_state.current_expiry))
+    
+    if not df_h.empty:
         st.markdown("---")
         st.subheader("🕐 5-Minute PCR Snapshot Tables")
         
-        df_h = pd.DataFrame(st.session_state.pcr_history)
+        # Formatting 'record_time' to show only HH:MM:SS format
+        df_h['Time'] = pd.to_datetime(df_h['record_time']).dt.strftime('%H:%M:%S')
         
         t1, t2, t3, t4 = st.columns(4)
         
@@ -268,7 +322,7 @@ try:
 
         st.markdown("---")
         st.subheader("📈 PCR Trends Chart")
-        st.line_chart(df_h.set_index("Time"), use_container_width=True)
+        st.line_chart(df_h.set_index("Time")[["OI PCR", "Change OI PCR", "Volume PCR"]], use_container_width=True)
 
 except Exception as ex:
     st.error(f"❌ Error: {ex}")
